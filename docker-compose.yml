@@ -1,0 +1,108 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: truco
+      POSTGRES_USER: truco
+      POSTGRES_PASSWORD: truco_dev
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U truco -d truco']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - '6380:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: development
+    command: npm run db:migrate
+    environment:
+      DATABASE_URL: postgresql://truco:truco_dev@postgres:5432/truco
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - migrate_node_modules:/app/node_modules
+
+  api:
+    build:
+      context: .
+      target: development
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://truco:truco_dev@postgres:5432/truco
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: replace-this-with-a-local-development-secret-32-chars
+      ACCESS_TOKEN_TTL_SECONDS: 900
+      REFRESH_TOKEN_TTL_DAYS: 180
+      CORS_ORIGINS: http://localhost:8081,http://localhost:19006
+      LOG_LEVEL: debug
+      OTEL_ENABLED: 'false'
+      OTEL_SERVICE_NAME: truco-backend
+      DB_POOL_MAX: 20
+    ports:
+      - '3000:3000'
+    volumes:
+      - .:/app
+      - api_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      target: development
+    command: npm run worker:dev
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://truco:truco_dev@postgres:5432/truco
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: replace-this-with-a-local-development-secret-32-chars
+      ACCESS_TOKEN_TTL_SECONDS: 900
+      REFRESH_TOKEN_TTL_DAYS: 180
+      CORS_ORIGINS: http://localhost:8081,http://localhost:19006
+      LOG_LEVEL: debug
+      OTEL_ENABLED: 'false'
+      OTEL_SERVICE_NAME: truco-worker
+      DB_POOL_MAX: 10
+    volumes:
+      - .:/app
+      - worker_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  redis_data:
+  migrate_node_modules:
+  api_node_modules:
+  worker_node_modules:
