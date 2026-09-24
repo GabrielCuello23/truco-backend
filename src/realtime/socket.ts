@@ -11,7 +11,13 @@ import { env, corsOrigins } from '../config/env';
 import type { Database } from '../database/client';
 import { gameEvents, games, roomMembers, rooms } from '../database/schema';
 import type { RedisClient } from '../infrastructure/redis';
-import { realtimeEvents, type GameUpdatedEvent, type RoomClosedEvent } from './events';
+import {
+  parseRealtimeEvent,
+  REALTIME_EVENTS_CHANNEL,
+  realtimeEvents,
+  type GameUpdatedEvent,
+  type RoomClosedEvent,
+} from './events';
 import { AppError } from '../shared/errors';
 import { scheduleBotTurn, scheduleNextHand } from '../modules/games/bot.service';
 import {
@@ -67,7 +73,8 @@ export async function createSocketServer(
 
   const pubClient = dependencies.redis.duplicate();
   const subClient = dependencies.redis.duplicate();
-  await Promise.all([pubClient.connect(), subClient.connect()]);
+  const eventSubscriber = dependencies.redis.duplicate();
+  await Promise.all([pubClient.connect(), subClient.connect(), eventSubscriber.connect()]);
   io.adapter(createAdapter(pubClient, subClient));
 
   const emitGameUpdated = (event: GameUpdatedEvent) => {
@@ -81,6 +88,12 @@ export async function createSocketServer(
   };
   realtimeEvents.on('game:updated', emitGameUpdated);
   realtimeEvents.on('room:closed', emitRoomClosed);
+  await eventSubscriber.subscribe(REALTIME_EVENTS_CHANNEL, (rawEvent) => {
+    const event = parseRealtimeEvent(rawEvent);
+    if (event?.type === 'room:closed') {
+      emitRoomClosed({ roomId: event.roomId });
+    }
+  });
 
   io.use(async (socket, next) => {
     try {
@@ -154,8 +167,8 @@ export async function createSocketServer(
             throw new AppError(404, 'GAME_NOT_FOUND', 'La partida no existe.');
           }
 
-          if (game.status === 'finished') {
-            throw new AppError(409, 'GAME_FINISHED', 'La partida ya terminó.');
+          if (game.status !== 'in_progress') {
+            throw new AppError(409, 'GAME_FINISHED', 'La partida ya terminó o fue abandonada.');
           }
 
           if (command.expectedVersion !== game.stateVersion) {
@@ -195,13 +208,14 @@ export async function createSocketServer(
               ? 'finished'
               : 'in_progress';
           const nextVersion = game.stateVersion + 1;
+          const now = new Date();
           const [updatedGame] = await transaction
             .update(games)
             .set({
               status: nextStatus,
               stateVersion: nextVersion,
               state: nextState as unknown as Record<string, unknown>,
-              updatedAt: new Date(),
+              updatedAt: now,
             })
             .where(eq(games.id, game.id))
             .returning();
@@ -219,12 +233,13 @@ export async function createSocketServer(
             payload: command.payload,
           });
 
-          if (nextStatus === 'finished') {
-            await transaction
-              .update(rooms)
-              .set({ status: 'finished', updatedAt: new Date() })
-              .where(eq(rooms.id, game.roomId));
-          }
+          await transaction
+            .update(rooms)
+            .set({
+              status: nextStatus === 'finished' ? 'finished' : 'in_progress',
+              updatedAt: now,
+            })
+            .where(eq(rooms.id, game.roomId));
 
           return {
             game: updatedGame,
@@ -275,7 +290,7 @@ export async function createSocketServer(
       realtimeEvents.off('game:updated', emitGameUpdated);
       realtimeEvents.off('room:closed', emitRoomClosed);
       await io.close();
-      await Promise.all([pubClient.quit(), subClient.quit()]);
+      await Promise.all([pubClient.quit(), subClient.quit(), eventSubscriber.quit()]);
     },
   };
 }

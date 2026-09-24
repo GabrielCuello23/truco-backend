@@ -59,6 +59,8 @@ services:
       OTEL_ENABLED: 'false'
       OTEL_SERVICE_NAME: truco-backend
       DB_POOL_MAX: 20
+      ROOM_INACTIVITY_TTL_HOURS: 4
+      ROOM_CLEANUP_INTERVAL_SECONDS: 300
     ports:
       - '3000:3000'
     volumes:
@@ -89,6 +91,8 @@ services:
       OTEL_ENABLED: 'false'
       OTEL_SERVICE_NAME: truco-worker
       DB_POOL_MAX: 10
+      ROOM_INACTIVITY_TTL_HOURS: 4
+      ROOM_CLEANUP_INTERVAL_SECONDS: 300
     volumes:
       - .:/app
       - worker_node_modules:/app/node_modules

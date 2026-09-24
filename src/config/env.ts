@@ -22,6 +22,8 @@ const envSchema = z
       .transform((value) => value === 'true'),
     OTEL_SERVICE_NAME: z.string().default('truco-backend'),
     DB_POOL_MAX: z.coerce.number().int().positive().max(100).default(20),
+    ROOM_INACTIVITY_TTL_HOURS: z.coerce.number().positive().default(4),
+    ROOM_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(300),
   })
   .superRefine((values, context) => {
     if (values.NODE_ENV === 'production' && values.JWT_SECRET === developmentJwtSecret) {

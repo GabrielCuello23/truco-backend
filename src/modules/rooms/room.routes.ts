@@ -281,7 +281,13 @@ export function createRoomRouter(database: Database): Router {
         role: 'player',
       });
 
-      return roomRecord;
+      const [updatedRoom] = await transaction
+        .update(rooms)
+        .set({ updatedAt: new Date() })
+        .where(eq(rooms.id, roomRecord.id))
+        .returning();
+
+      return updatedRoom ?? roomRecord;
     });
 
     const members = await database
@@ -555,13 +561,14 @@ export function createRoomRouter(database: Database): Router {
           ? 'finished'
           : 'in_progress';
       const nextVersion = game.stateVersion + 1;
+      const now = new Date();
       const [updatedGame] = await transaction
         .update(games)
         .set({
           status: nextStatus,
           stateVersion: nextVersion,
           state: nextState as unknown as Record<string, unknown>,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(eq(games.id, game.id))
         .returning();
@@ -579,12 +586,13 @@ export function createRoomRouter(database: Database): Router {
         payload: { cardId: input.cardId },
       });
 
-      if (nextStatus === 'finished') {
-        await transaction
-          .update(rooms)
-          .set({ status: 'finished', updatedAt: new Date() })
-          .where(eq(rooms.id, roomId));
-      }
+      await transaction
+        .update(rooms)
+        .set({
+          status: nextStatus === 'finished' ? 'finished' : 'in_progress',
+          updatedAt: now,
+        })
+        .where(eq(rooms.id, roomId));
 
       return { game: updatedGame, state: nextState };
     });

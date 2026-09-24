@@ -14,7 +14,12 @@ import {
 
 export const userRoleEnum = pgEnum('user_role', ['player', 'admin']);
 export const authProviderEnum = pgEnum('auth_provider', ['password', 'google', 'apple']);
-export const roomStatusEnum = pgEnum('room_status', ['waiting', 'in_progress', 'finished']);
+export const roomStatusEnum = pgEnum('room_status', [
+  'waiting',
+  'in_progress',
+  'finished',
+  'abandoned',
+]);
 export const roomMemberRoleEnum = pgEnum('room_member_role', ['host', 'player']);
 export const gameStatusEnum = pgEnum('game_status', [
   'waiting',
@@ -91,6 +96,7 @@ export const rooms = pgTable(
   (table) => [
     uniqueIndex('rooms_code_idx').on(table.code),
     index('rooms_host_id_idx').on(table.hostId),
+    index('rooms_status_updated_at_idx').on(table.status, table.updatedAt),
   ],
 );
 

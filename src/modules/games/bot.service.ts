@@ -46,7 +46,7 @@ async function processNextHand(database: Database, gameId: string): Promise<void
       .for('update')
       .limit(1);
 
-    if (!game || game.status === 'finished') {
+    if (!game || game.status !== 'in_progress') {
       return null;
     }
 
@@ -62,12 +62,13 @@ async function processNextHand(database: Database, gameId: string): Promise<void
       type: 'new_hand',
     });
     const nextVersion = game.stateVersion + 1;
+    const now = new Date();
     const [updatedGame] = await transaction
       .update(games)
       .set({
         stateVersion: nextVersion,
         state: nextState as unknown as Record<string, unknown>,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(games.id, game.id))
       .returning();
@@ -84,6 +85,8 @@ async function processNextHand(database: Database, gameId: string): Promise<void
       actorId: null,
       payload: { automatic: true },
     });
+
+    await transaction.update(rooms).set({ updatedAt: now }).where(eq(rooms.id, game.roomId));
 
     return { game: updatedGame, state: nextState };
   });
@@ -112,7 +115,7 @@ export async function processBotTurn(database: Database, gameId: string): Promis
       .for('update')
       .limit(1);
 
-    if (!game || game.status === 'finished') {
+    if (!game || game.status !== 'in_progress') {
       return null;
     }
 
@@ -132,13 +135,14 @@ export async function processBotTurn(database: Database, gameId: string): Promis
         ? 'finished'
         : 'in_progress';
     const nextVersion = game.stateVersion + 1;
+    const now = new Date();
     const [updatedGame] = await transaction
       .update(games)
       .set({
         status: nextStatus,
         stateVersion: nextVersion,
         state: nextState as unknown as Record<string, unknown>,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(games.id, game.id))
       .returning();
@@ -160,12 +164,13 @@ export async function processBotTurn(database: Database, gameId: string): Promis
       },
     });
 
-    if (nextStatus === 'finished') {
-      await transaction
-        .update(rooms)
-        .set({ status: 'finished', updatedAt: new Date() })
-        .where(eq(rooms.id, game.roomId));
-    }
+    await transaction
+      .update(rooms)
+      .set({
+        status: nextStatus === 'finished' ? 'finished' : 'in_progress',
+        updatedAt: now,
+      })
+      .where(eq(rooms.id, game.roomId));
 
     return { game: updatedGame, state: nextState };
   });

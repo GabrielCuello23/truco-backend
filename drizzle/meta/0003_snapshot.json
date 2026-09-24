@@ -1,6 +1,6 @@
 {
-  "id": "31542afb-fec4-4631-90b3-db7d1048d44f",
-  "prevId": "280aa6d2-13c4-40f0-b6a7-b5f5131cb17b",
+  "id": "39eb8d64-228f-41d5-9c8b-1b500394c15c",
+  "prevId": "31542afb-fec4-4631-90b3-db7d1048d44f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -744,6 +744,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "rooms_status_updated_at_idx": {
+          "name": "rooms_status_updated_at_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -878,7 +899,8 @@
       "values": [
         "waiting",
         "in_progress",
-        "finished"
+        "finished",
+        "abandoned"
       ]
     },
     "public.user_role": {
