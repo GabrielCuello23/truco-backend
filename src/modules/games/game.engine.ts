@@ -776,19 +776,44 @@ function resolveTruco(state: GameState, accepted: boolean): void {
     state.handWinnerTeam = getPlayerTeam(state, pending.callerId);
     revealEnvidoCards(state);
   } else {
-    state.truco.teamWithRaiseRight = getPlayerTeam(state, pending.responderId);
+    state.truco.teamWithRaiseRight = null;
+    state.currentTurnPlayerId = pending.callerId;
   }
 
   state.truco.pending = null;
 }
 
 function foldHand(state: GameState, actorId: string): void {
-  if (
-    state.currentTurnPlayerId !== actorId ||
-    state.truco.pending ||
-    state.envido.pending ||
-    state.flor.pending
-  ) {
+  if (state.envido.pending) {
+    if (state.envido.pending.responderId !== actorId) {
+      throw new AppError(409, 'INVALID_FOLD', 'No puedes irte al mazo en este momento.');
+    }
+
+    const winnerTeam = getPlayerTeam(state, state.envido.pending.callerId);
+    state.envido.pending = null;
+    state.envido.resolved = true;
+    addScore(state, winnerTeam, 2);
+    state.handStatus = 'finished';
+    state.handWinnerTeam = winnerTeam;
+    revealEnvidoCards(state);
+    return;
+  }
+
+  if (state.truco.pending) {
+    if (state.truco.pending.responderId !== actorId) {
+      throw new AppError(409, 'INVALID_FOLD', 'No puedes irte al mazo en este momento.');
+    }
+
+    const winnerTeam = getPlayerTeam(state, state.truco.pending.callerId);
+    state.truco.pending = null;
+    addScore(state, winnerTeam, 1);
+    state.handStatus = 'finished';
+    state.handWinnerTeam = winnerTeam;
+    revealEnvidoCards(state);
+    return;
+  }
+
+  if (state.currentTurnPlayerId !== actorId || state.flor.pending) {
     throw new AppError(409, 'INVALID_FOLD', 'No puedes irte al mazo en este momento.');
   }
 
@@ -961,7 +986,7 @@ export function getAvailableActions(state: GameState, actorId: string): GameActi
       return [];
     }
 
-    return ['quiero', 'no_quiero', ...getEnvidoRaiseActions(state, actorId)];
+    return ['quiero', 'no_quiero', ...getEnvidoRaiseActions(state, actorId), 'fold'];
   }
 
   if (state.flor.pending) {
@@ -985,6 +1010,7 @@ export function getAvailableActions(state: GameState, actorId: string): GameActi
         actions.push(...getInitialEnvidoActions(state, actorId));
       }
     }
+    actions.push('fold');
     return actions;
   }
 
@@ -1258,7 +1284,7 @@ export function getNextBotAction(state: GameState): BotAction | null {
     return botCard ? { type: 'play_card', cardId: botCard.id } : null;
   }
 
-  const voluntaryCalls = responseActions;
+  const voluntaryCalls = responseActions.filter((action) => action !== 'fold');
   if (voluntaryCalls.length > 0 && randomInt(100) < 35) {
     const call = chooseRandom(voluntaryCalls);
     if (call) {

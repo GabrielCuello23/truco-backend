@@ -84,6 +84,7 @@ describe('truco game engine', () => {
       'envido',
       'real_envido',
       'falta_envido',
+      'fold',
     ]);
 
     state = applyGameAction(state, 'player-2', { type: 'envido' });
@@ -92,13 +93,19 @@ describe('truco game engine', () => {
       'no_quiero',
       'real_envido',
       'falta_envido',
+      'fold',
     ]);
 
     state = applyGameAction(state, 'player-1', { type: 'real_envido' });
-    expect(getAvailableActions(state, 'player-2')).toEqual(['quiero', 'no_quiero', 'falta_envido']);
+    expect(getAvailableActions(state, 'player-2')).toEqual([
+      'quiero',
+      'no_quiero',
+      'falta_envido',
+      'fold',
+    ]);
 
     state = applyGameAction(state, 'player-2', { type: 'falta_envido' });
-    expect(getAvailableActions(state, 'player-1')).toEqual(['quiero', 'no_quiero']);
+    expect(getAvailableActions(state, 'player-1')).toEqual(['quiero', 'no_quiero', 'fold']);
   });
 
   it('allows direct truco raises and preserves the raise right', () => {
@@ -111,7 +118,7 @@ describe('truco game engine', () => {
     expect(getAvailableActions(state, 'player-2')).toEqual([]);
 
     state = applyGameAction(state, 'player-1', { type: 'vale_cuatro' });
-    expect(getAvailableActions(state, 'player-2')).toEqual(['quiero', 'no_quiero']);
+    expect(getAvailableActions(state, 'player-2')).toEqual(['quiero', 'no_quiero', 'fold']);
   });
 
   it('follows the flor raise matrix and does not create a response without rival flor', () => {
@@ -144,25 +151,49 @@ describe('truco game engine', () => {
     expect(getAvailableActions(state, 'player-2')).toEqual(['quiero', 'no_quiero']);
   });
 
-  it('applies the accepted truco and retruco values', () => {
+  it('ends the response after quiero and gives the next play to the caller', () => {
     let state = createState();
     state = applyGameAction(state, 'player-1', { type: 'truco' });
     state = applyGameAction(state, 'player-2', { type: 'quiero' });
-    state = applyGameAction(state, 'player-2', { type: 'retruco' });
-    state = applyGameAction(state, 'player-1', { type: 'quiero' });
 
-    expect(state.truco.level).toBe(2);
+    expect(getAvailableActions(state, 'player-2')).toEqual([]);
+    expect(getAvailableActions(state, 'player-2')).not.toContain('retruco');
+    expect(getAvailableActions(state, 'player-1')).toContain('play_card');
+    expect(getAvailableActions(state, 'player-1')).not.toContain('retruco');
+    expect(state.currentTurnPlayerId).toBe('player-1');
     expect(state.scores).toEqual({ A: 0, B: 0 });
   });
 
-  it('awards the previous truco value when an increase is rejected', () => {
+  it('keeps the direct retruco response and resumes with the caller', () => {
     let state = createState();
     state = applyGameAction(state, 'player-1', { type: 'truco' });
-    state = applyGameAction(state, 'player-2', { type: 'quiero' });
     state = applyGameAction(state, 'player-2', { type: 'retruco' });
-    state = applyGameAction(state, 'player-1', { type: 'no_quiero' });
+    state = applyGameAction(state, 'player-1', { type: 'quiero' });
 
-    expect(state.scores).toEqual({ A: 0, B: 2 });
+    expect(getAvailableActions(state, 'player-1')).toEqual([]);
+    expect(getAvailableActions(state, 'player-2')).toContain('play_card');
+    expect(state.currentTurnPlayerId).toBe('player-2');
+  });
+
+  it('awards two points when the responder folds on an envido', () => {
+    let state = createNoFlorState();
+    state = applyGameAction(state, 'player-1', { type: 'envido' });
+    expect(getAvailableActions(state, 'player-2')).toContain('fold');
+
+    state = applyGameAction(state, 'player-2', { type: 'fold' });
+
+    expect(state.scores).toEqual({ A: 2, B: 0 });
+    expect(state.handStatus).toBe('finished');
+  });
+
+  it('awards one point when the responder folds on a truco', () => {
+    let state = createNoFlorState();
+    state = applyGameAction(state, 'player-1', { type: 'truco' });
+    expect(getAvailableActions(state, 'player-2')).toContain('fold');
+
+    state = applyGameAction(state, 'player-2', { type: 'fold' });
+
+    expect(state.scores).toEqual({ A: 1, B: 0 });
     expect(state.handStatus).toBe('finished');
   });
 
