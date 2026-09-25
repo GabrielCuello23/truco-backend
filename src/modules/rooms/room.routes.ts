@@ -130,6 +130,17 @@ export function createRoomRouter(database: Database): Router {
           return room;
         });
 
+        request.log.info(
+          {
+            event: 'room.created',
+            roomId: result.id,
+            roomCode: result.code,
+            hostId: userId,
+            mode: 'multiplayer',
+          },
+          'Room created',
+        );
+
         response.status(201).json({ room: result });
         return;
       } catch (error) {
@@ -209,6 +220,17 @@ export function createRoomRouter(database: Database): Router {
 
       return { room, game, state };
     });
+
+    request.log.info(
+      {
+        event: 'room.created',
+        roomId: result.room.id,
+        roomCode: result.room.code,
+        hostId: userId,
+        mode: 'bot',
+      },
+      'Room created',
+    );
 
     realtimeEvents.emit('game:updated', {
       roomId: result.game.roomId,
