@@ -29,6 +29,13 @@
       "when": 1790250882600,
       "tag": "0004_stale_room_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790369170526,
+      "tag": "0005_chat_messages",
+      "breakpoints": true
     }
   ]
 }

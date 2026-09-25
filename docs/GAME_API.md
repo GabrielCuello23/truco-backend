@@ -24,6 +24,18 @@ El cuerpo es opcional. Los valores predeterminados son `targetScore: 30` y `with
 
 `GET /api/v1/rooms/:roomId` devuelve la configuración y los miembros.
 
+## Chat de sala
+
+`GET /api/v1/rooms/:roomId/messages?limit=100` devuelve los mensajes persistidos de la sala en orden cronológico. Acepta `before` como fecha ISO para consultar una página anterior.
+
+`POST /api/v1/rooms/:roomId/messages` crea un mensaje para los miembros activos de la sala:
+
+```json
+{ "body": "¡Buenas!" }
+```
+
+El backend limita cada mensaje a 500 caracteres y publica el mensaje creado mediante el evento Socket.IO `chat:message` dentro de `room:<roomId>`.
+
 `POST /api/v1/rooms/bot` crea e inicia inmediatamente una sala de dos jugadores contra el bot. Acepta `targetScore` y `withFlor` con los mismos valores predeterminados.
 
 ## Partida

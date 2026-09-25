@@ -10,6 +10,15 @@ export type RoomClosedEvent = {
   roomId: string;
 };
 
+export type ChatMessageEvent = {
+  id: string;
+  roomId: string;
+  userId: string;
+  displayName: string;
+  body: string;
+  createdAt: string;
+};
+
 export const REALTIME_EVENTS_CHANNEL = 'truco:realtime-events';
 
 export type CrossProcessRealtimeEvent = { type: 'room:closed'; roomId: string };

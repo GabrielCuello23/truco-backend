@@ -119,6 +119,25 @@ export const roomMembers = pgTable(
   ],
 );
 
+export const roomMessages = pgTable(
+  'room_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    roomId: uuid('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    body: varchar('body', { length: 500 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('room_messages_room_created_at_idx').on(table.roomId, table.createdAt),
+    index('room_messages_user_id_idx').on(table.userId),
+  ],
+);
+
 export const games = pgTable(
   'games',
   {

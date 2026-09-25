@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 
 import { createAdapter } from '@socket.io/redis-adapter';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { jwtVerify } from 'jose';
 import { Server } from 'socket.io';
 import { z } from 'zod';
@@ -16,6 +16,7 @@ import {
   REALTIME_EVENTS_CHANNEL,
   realtimeEvents,
   type GameUpdatedEvent,
+  type ChatMessageEvent,
   type RoomClosedEvent,
 } from './events';
 import { AppError } from '../shared/errors';
@@ -86,8 +87,12 @@ export async function createSocketServer(
   const emitRoomClosed = (event: RoomClosedEvent) => {
     io.to(`room:${event.roomId}`).emit('room:closed', { roomId: event.roomId });
   };
+  const emitChatMessage = (event: ChatMessageEvent) => {
+    io.to(`room:${event.roomId}`).emit('chat:message', event);
+  };
   realtimeEvents.on('game:updated', emitGameUpdated);
   realtimeEvents.on('room:closed', emitRoomClosed);
+  realtimeEvents.on('chat:message', emitChatMessage);
   await eventSubscriber.subscribe(REALTIME_EVENTS_CHANNEL, (rawEvent) => {
     const event = parseRealtimeEvent(rawEvent);
     if (event?.type === 'room:closed') {
@@ -121,7 +126,13 @@ export async function createSocketServer(
         const [membership] = await dependencies.database
           .select()
           .from(roomMembers)
-          .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, socket.data.userId)))
+          .where(
+            and(
+              eq(roomMembers.roomId, roomId),
+              eq(roomMembers.userId, socket.data.userId),
+              isNull(roomMembers.leftAt),
+            ),
+          )
           .limit(1);
 
         if (!membership) {
@@ -289,6 +300,7 @@ export async function createSocketServer(
     close: async () => {
       realtimeEvents.off('game:updated', emitGameUpdated);
       realtimeEvents.off('room:closed', emitRoomClosed);
+      realtimeEvents.off('chat:message', emitChatMessage);
       await io.close();
       await Promise.all([pubClient.quit(), subClient.quit(), eventSubscriber.quit()]);
     },
