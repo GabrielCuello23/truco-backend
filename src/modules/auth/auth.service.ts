@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import { hash, verify } from 'argon2';
 import { SignJWT } from 'jose';
 
@@ -8,10 +8,14 @@ import { env } from '../../config/env';
 import type { Database } from '../../database/client';
 import { authAccounts, refreshSessions, users } from '../../database/schema';
 import { AppError } from '../../shared/errors';
+import { type CountryCode } from './countries';
 
 const jwtSecret = new TextEncoder().encode(env.JWT_SECRET);
 
-export type PublicUser = Pick<typeof users.$inferSelect, 'id' | 'email' | 'displayName' | 'role'>;
+export type PublicUser = Pick<
+  typeof users.$inferSelect,
+  'id' | 'email' | 'displayName' | 'role' | 'countryCode' | 'pendingCountryCode'
+>;
 
 type TokenPair = {
   accessToken: string;
@@ -64,12 +68,14 @@ function toPublicUser(user: typeof users.$inferSelect): PublicUser {
     email: user.email,
     displayName: user.displayName,
     role: user.role,
+    countryCode: user.countryCode,
+    pendingCountryCode: user.pendingCountryCode,
   };
 }
 
 export async function registerUser(
   database: Database,
-  input: { nickname: string; email: string; password: string },
+  input: { nickname: string; email: string; password: string; countryCode: CountryCode },
 ): Promise<{ user: PublicUser; tokens: TokenPair }> {
   const email = normalizeEmail(input.email);
   const passwordHash = await hash(input.password, { type: 2 });
@@ -82,6 +88,7 @@ export async function registerUser(
           email,
           passwordHash,
           displayName: input.nickname.trim(),
+          countryCode: input.countryCode,
         })
         .returning();
 
@@ -105,6 +112,111 @@ export async function registerUser(
 
     throw error;
   }
+}
+
+export async function requestCountryChange(
+  database: Database,
+  userId: string,
+  countryCode: CountryCode,
+): Promise<PublicUser> {
+  const [currentUser] = await database
+    .select({ countryCode: users.countryCode })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!currentUser) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+  }
+
+  const [updatedUser] = await database
+    .update(users)
+    .set(
+      currentUser.countryCode
+        ? {
+            pendingCountryCode: currentUser.countryCode === countryCode ? null : countryCode,
+            updatedAt: new Date(),
+          }
+        : { countryCode, pendingCountryCode: null, updatedAt: new Date() },
+    )
+    .where(eq(users.id, userId))
+    .returning();
+
+  if (!updatedUser) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+  }
+
+  return toPublicUser(updatedUser);
+}
+
+export async function updateUserProfile(
+  database: Database,
+  userId: string,
+  input: { displayName: string; email: string; countryCode: CountryCode },
+): Promise<PublicUser> {
+  const email = normalizeEmail(input.email);
+
+  try {
+    return await database.transaction(async (transaction) => {
+      const [currentUser] = await transaction
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!currentUser) {
+        throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+      }
+
+      const [updatedUser] = await transaction
+        .update(users)
+        .set({
+          displayName: input.displayName.trim(),
+          email,
+          ...(currentUser.countryCode
+            ? {
+                pendingCountryCode:
+                  currentUser.countryCode === input.countryCode ? null : input.countryCode,
+              }
+            : { countryCode: input.countryCode, pendingCountryCode: null }),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId))
+        .returning();
+
+      if (!updatedUser) {
+        throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+      }
+
+      await transaction
+        .update(authAccounts)
+        .set({ providerAccountId: email, updatedAt: new Date() })
+        .where(and(eq(authAccounts.userId, userId), eq(authAccounts.provider, 'password')));
+
+      return toPublicUser(updatedUser);
+    });
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
+      throw new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'El email ya está registrado.');
+    }
+
+    throw error;
+  }
+}
+
+/** Applies requested country changes when the active season is reset. */
+export async function applyPendingCountryChanges(database: Database): Promise<number> {
+  const updatedUsers = await database
+    .update(users)
+    .set({
+      countryCode: sql`${users.pendingCountryCode}`,
+      pendingCountryCode: null,
+      updatedAt: new Date(),
+    })
+    .where(isNotNull(users.pendingCountryCode))
+    .returning({ id: users.id });
+
+  return updatedUsers.length;
 }
 
 export async function loginUser(

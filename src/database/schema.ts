@@ -35,6 +35,8 @@ export const users = pgTable(
     email: varchar('email', { length: 320 }),
     passwordHash: varchar('password_hash', { length: 255 }),
     displayName: varchar('display_name', { length: 80 }).notNull(),
+    countryCode: varchar('country_code', { length: 2 }),
+    pendingCountryCode: varchar('pending_country_code', { length: 2 }),
     role: userRoleEnum('role').notNull().default('player'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

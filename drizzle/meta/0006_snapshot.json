@@ -1,6 +1,6 @@
 {
-  "id": "cf9dd3ca-96e0-454e-8b8c-2e121d10984c",
-  "prevId": "9daf6a70-1237-432d-8979-82acdab2d6e6",
+  "id": "2bffe4ed-bdbc-409f-94f4-eccab2e86620",
+  "prevId": "cf9dd3ca-96e0-454e-8b8c-2e121d10984c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -939,6 +939,18 @@
           "type": "varchar(80)",
           "primaryKey": false,
           "notNull": true
+        },
+        "country_code": {
+          "name": "country_code",
+          "type": "varchar(2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_country_code": {
+          "name": "pending_country_code",
+          "type": "varchar(2)",
+          "primaryKey": false,
+          "notNull": false
         },
         "role": {
           "name": "role",
