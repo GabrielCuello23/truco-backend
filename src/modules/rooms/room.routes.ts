@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto';
 
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 
@@ -21,14 +21,19 @@ import {
 } from '../games/game.engine';
 
 const createRoomSchema = z.object({
+  name: z.string().trim().min(1).max(80).default('Sala sin nombre'),
   maxPlayers: z.number().int().min(2).max(4).default(4),
   targetScore: z.union([z.literal(15), z.literal(30)]).default(30),
   withFlor: z.boolean().default(true),
+  isPublic: z.boolean().default(false),
 });
 
 const roomIdSchema = z.string().uuid();
 const joinRoomSchema = z.object({
   code: z.string().trim().toUpperCase().length(6),
+});
+const joinRoomByIdSchema = z.object({
+  code: z.string().trim().toUpperCase().length(6).optional(),
 });
 const gameRoomIdSchema = z.string().uuid();
 const startGameSchema = z.object({}).default({});
@@ -109,8 +114,10 @@ export function createRoomRouter(database: Database): Router {
           const [room] = await transaction
             .insert(rooms)
             .values({
-              code: generateRoomCode(),
+              name: input.name,
+              code: input.isPublic ? null : generateRoomCode(),
               hostId: userId,
+              isPublic: input.isPublic,
               maxPlayers: input.maxPlayers,
               targetScore: input.targetScore,
               withFlor: input.withFlor,
@@ -173,8 +180,10 @@ export function createRoomRouter(database: Database): Router {
       const [room] = await transaction
         .insert(rooms)
         .values({
+          name: 'Partida contra bot',
           code: generateRoomCode(),
           hostId: userId,
+          isPublic: false,
           maxPlayers: 2,
           status: 'in_progress',
           targetScore: input.targetScore,
@@ -266,7 +275,7 @@ export function createRoomRouter(database: Database): Router {
       const [roomRecord] = await transaction
         .select()
         .from(rooms)
-        .where(eq(rooms.code, code))
+        .where(and(eq(rooms.code, code), eq(rooms.isPublic, false)))
         .for('update')
         .limit(1);
 
@@ -307,6 +316,107 @@ export function createRoomRouter(database: Database): Router {
         .update(rooms)
         .set({ updatedAt: new Date() })
         .where(eq(rooms.id, roomRecord.id))
+        .returning();
+
+      return updatedRoom ?? roomRecord;
+    });
+
+    const members = await database
+      .select({
+        id: users.id,
+        displayName: users.displayName,
+        role: roomMembers.role,
+        joinedAt: roomMembers.joinedAt,
+      })
+      .from(roomMembers)
+      .innerJoin(users, eq(users.id, roomMembers.userId))
+      .where(eq(roomMembers.roomId, room.id));
+
+    response.status(200).json({ room, members });
+  });
+
+  router.get('/', async (request, response) => {
+    const { visibility } = z
+      .object({ visibility: z.enum(['public', 'private']).default('public') })
+      .parse({ visibility: request.query.visibility ?? 'public' });
+    const isPublic = visibility === 'public';
+
+    const rows = await database
+      .select({ room: rooms, memberCount: count(roomMembers.userId) })
+      .from(rooms)
+      .leftJoin(roomMembers, and(eq(roomMembers.roomId, rooms.id), isNull(roomMembers.leftAt)))
+      .where(and(eq(rooms.status, 'waiting'), eq(rooms.isPublic, isPublic)))
+      .groupBy(rooms.id)
+      .orderBy(asc(rooms.createdAt));
+
+    response.status(200).json({
+      rooms: rows.map(({ room, memberCount }) => ({
+        ...room,
+        // Los códigos nunca forman parte del lobby; se comparten sólo dentro de la sala.
+        code: null,
+        memberCount: Number(memberCount),
+      })),
+    });
+  });
+
+  router.post('/:roomId/join', async (request, response) => {
+    const roomId = roomIdSchema.parse(request.params.roomId);
+    const { code } = joinRoomByIdSchema.parse(request.body ?? {});
+    const userId = request.auth!.userId;
+
+    const room = await database.transaction(async (transaction) => {
+      const [roomRecord] = await transaction
+        .select()
+        .from(rooms)
+        .where(eq(rooms.id, roomId))
+        .for('update')
+        .limit(1);
+
+      if (!roomRecord) {
+        throw new AppError(404, 'ROOM_NOT_FOUND', 'Sala no encontrada.');
+      }
+
+      if (!roomRecord.isPublic && !code) {
+        throw new AppError(400, 'ROOM_CODE_REQUIRED', 'Ingresá el código de la sala.');
+      }
+
+      if (!roomRecord.isPublic && roomRecord.code !== code) {
+        throw new AppError(404, 'ROOM_CODE_INVALID', 'El código no corresponde a esta sala.');
+      }
+
+      const [existingMembership] = await transaction
+        .select()
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+        .limit(1);
+
+      if (existingMembership) {
+        return roomRecord;
+      }
+
+      if (roomRecord.status !== 'waiting') {
+        throw new AppError(409, 'ROOM_NOT_OPEN', 'La sala ya no acepta nuevos jugadores.');
+      }
+
+      const members = await transaction
+        .select({ userId: roomMembers.userId })
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, roomId), isNull(roomMembers.leftAt)));
+
+      if (members.length >= roomRecord.maxPlayers) {
+        throw new AppError(409, 'ROOM_FULL', 'La sala ya alcanzó su capacidad máxima.');
+      }
+
+      await transaction.insert(roomMembers).values({
+        roomId,
+        userId,
+        role: 'player',
+      });
+
+      const [updatedRoom] = await transaction
+        .update(rooms)
+        .set({ updatedAt: new Date() })
+        .where(eq(rooms.id, roomId))
         .returning();
 
       return updatedRoom ?? roomRecord;

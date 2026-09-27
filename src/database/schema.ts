@@ -82,10 +82,12 @@ export const rooms = pgTable(
   'rooms',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    code: varchar('code', { length: 8 }).notNull(),
+    name: varchar('name', { length: 80 }).notNull().default('Sala sin nombre'),
+    code: varchar('code', { length: 8 }),
     hostId: uuid('host_id')
       .notNull()
       .references(() => users.id),
+    isPublic: boolean('is_public').notNull().default(false),
     status: roomStatusEnum('status').notNull().default('waiting'),
     maxPlayers: integer('max_players').notNull().default(4),
     targetScore: integer('target_score').notNull().default(30),
