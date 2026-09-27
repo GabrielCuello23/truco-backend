@@ -483,7 +483,7 @@ export function createRoomRouter(database: Database): Router {
     const roomId = roomIdSchema.parse(request.params.roomId);
     const userId = request.auth!.userId;
 
-    await database.transaction(async (transaction) => {
+    const result = await database.transaction(async (transaction) => {
       const [membership] = await transaction
         .select()
         .from(roomMembers)
@@ -501,7 +501,7 @@ export function createRoomRouter(database: Database): Router {
       }
 
       const [room] = await transaction
-        .select({ id: rooms.id })
+        .select()
         .from(rooms)
         .where(eq(rooms.id, roomId))
         .for('update')
@@ -511,10 +511,89 @@ export function createRoomRouter(database: Database): Router {
         throw new AppError(404, 'ROOM_NOT_FOUND', 'Sala no encontrada.');
       }
 
+      const [user] = await transaction
+        .select({ displayName: users.displayName })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!user) {
+        throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+      }
+
+      const [game] = await transaction
+        .select()
+        .from(games)
+        .where(eq(games.roomId, roomId))
+        .orderBy(desc(games.createdAt))
+        .limit(1);
+      const gameState = game?.state as unknown as GameState | undefined;
+      const winner =
+        game?.status === 'in_progress'
+          ? gameState?.players.find((player) => player.id !== userId && player.id !== BOT_PLAYER_ID)
+          : undefined;
+
+      if (winner && game) {
+        const now = new Date();
+        await transaction
+          .update(roomMembers)
+          .set({ leftAt: now })
+          .where(
+            and(
+              eq(roomMembers.roomId, roomId),
+              eq(roomMembers.userId, userId),
+              isNull(roomMembers.leftAt),
+            ),
+          );
+        await transaction
+          .update(games)
+          .set({ status: 'finished', updatedAt: now })
+          .where(eq(games.id, game.id));
+        await transaction
+          .update(rooms)
+          .set({ status: 'finished', updatedAt: now })
+          .where(eq(rooms.id, roomId));
+
+        return {
+          type: 'player_left' as const,
+          event: {
+            roomId,
+            leftUserId: userId,
+            leftUserName: user.displayName,
+            winnerUserId: winner.id,
+            winnerUserName: winner.displayName,
+          },
+        };
+      }
+
+      const now = new Date();
+      await transaction
+        .update(roomMembers)
+        .set({ leftAt: now })
+        .where(
+          and(
+            eq(roomMembers.roomId, roomId),
+            eq(roomMembers.userId, userId),
+            isNull(roomMembers.leftAt),
+          ),
+        );
+      const remainingMembers = await transaction
+        .select({ userId: roomMembers.userId })
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, roomId), isNull(roomMembers.leftAt)));
+
       await transaction.delete(rooms).where(eq(rooms.id, roomId));
+      return {
+        type: 'room_closed' as const,
+        notifyRoomClosed: remainingMembers.length > 0,
+      };
     });
 
-    realtimeEvents.emit('room:closed', { roomId });
+    if (result.type === 'player_left') {
+      realtimeEvents.emit('room:player_left', result.event);
+    } else if (result.notifyRoomClosed) {
+      realtimeEvents.emit('room:closed', { roomId });
+    }
     response.status(204).send();
   });
 

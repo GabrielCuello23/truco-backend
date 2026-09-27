@@ -17,6 +17,7 @@ import {
   realtimeEvents,
   type GameUpdatedEvent,
   type ChatMessageEvent,
+  type RoomPlayerLeftEvent,
   type RoomClosedEvent,
 } from './events';
 import { AppError } from '../shared/errors';
@@ -87,16 +88,22 @@ export async function createSocketServer(
   const emitRoomClosed = (event: RoomClosedEvent) => {
     io.to(`room:${event.roomId}`).emit('room:closed', { roomId: event.roomId });
   };
+  const emitRoomPlayerLeft = (event: RoomPlayerLeftEvent) => {
+    io.to(`room:${event.roomId}`).emit('room:player_left', event);
+  };
   const emitChatMessage = (event: ChatMessageEvent) => {
     io.to(`room:${event.roomId}`).emit('chat:message', event);
   };
   realtimeEvents.on('game:updated', emitGameUpdated);
   realtimeEvents.on('room:closed', emitRoomClosed);
+  realtimeEvents.on('room:player_left', emitRoomPlayerLeft);
   realtimeEvents.on('chat:message', emitChatMessage);
   await eventSubscriber.subscribe(REALTIME_EVENTS_CHANNEL, (rawEvent) => {
     const event = parseRealtimeEvent(rawEvent);
     if (event?.type === 'room:closed') {
       emitRoomClosed({ roomId: event.roomId });
+    } else if (event?.type === 'room:player_left') {
+      emitRoomPlayerLeft(event);
     }
   });
 
@@ -300,6 +307,7 @@ export async function createSocketServer(
     close: async () => {
       realtimeEvents.off('game:updated', emitGameUpdated);
       realtimeEvents.off('room:closed', emitRoomClosed);
+      realtimeEvents.off('room:player_left', emitRoomPlayerLeft);
       realtimeEvents.off('chat:message', emitChatMessage);
       await io.close();
       await Promise.all([pubClient.quit(), subClient.quit(), eventSubscriber.quit()]);
