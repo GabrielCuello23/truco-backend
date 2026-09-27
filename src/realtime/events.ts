@@ -27,6 +27,33 @@ export type ChatMessageEvent = {
   createdAt: string;
 };
 
+export type LobbyRoomSnapshot = {
+  id: string;
+  name: string;
+  code: null;
+  hostId: string;
+  isPublic: boolean;
+  status: 'waiting';
+  maxPlayers: number;
+  targetScore: 15 | 30;
+  withFlor: boolean;
+  createdAt: string;
+  updatedAt: string;
+  memberCount: number;
+};
+
+export type LobbyRoomCreatedEvent = {
+  room: LobbyRoomSnapshot;
+};
+
+export type LobbyRoomUpdatedEvent = {
+  room: LobbyRoomSnapshot;
+};
+
+export type LobbyRoomRemovedEvent = {
+  roomId: string;
+};
+
 export const REALTIME_EVENTS_CHANNEL = 'truco:realtime-events';
 
 export type CrossProcessRealtimeEvent =

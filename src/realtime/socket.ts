@@ -19,6 +19,9 @@ import {
   type ChatMessageEvent,
   type RoomPlayerLeftEvent,
   type RoomClosedEvent,
+  type LobbyRoomCreatedEvent,
+  type LobbyRoomUpdatedEvent,
+  type LobbyRoomRemovedEvent,
 } from './events';
 import { AppError } from '../shared/errors';
 import { scheduleBotTurn, scheduleNextHand } from '../modules/games/bot.service';
@@ -87,6 +90,7 @@ export async function createSocketServer(
   };
   const emitRoomClosed = (event: RoomClosedEvent) => {
     io.to(`room:${event.roomId}`).emit('room:closed', { roomId: event.roomId });
+    io.emit('lobby:room_removed', { roomId: event.roomId });
   };
   const emitRoomPlayerLeft = (event: RoomPlayerLeftEvent) => {
     io.to(`room:${event.roomId}`).emit('room:player_left', event);
@@ -94,10 +98,22 @@ export async function createSocketServer(
   const emitChatMessage = (event: ChatMessageEvent) => {
     io.to(`room:${event.roomId}`).emit('chat:message', event);
   };
+  const emitLobbyRoomCreated = (event: LobbyRoomCreatedEvent) => {
+    io.emit('lobby:room_created', event.room);
+  };
+  const emitLobbyRoomUpdated = (event: LobbyRoomUpdatedEvent) => {
+    io.emit('lobby:room_updated', event.room);
+  };
+  const emitLobbyRoomRemoved = (event: LobbyRoomRemovedEvent) => {
+    io.emit('lobby:room_removed', event);
+  };
   realtimeEvents.on('game:updated', emitGameUpdated);
   realtimeEvents.on('room:closed', emitRoomClosed);
   realtimeEvents.on('room:player_left', emitRoomPlayerLeft);
   realtimeEvents.on('chat:message', emitChatMessage);
+  realtimeEvents.on('lobby:room_created', emitLobbyRoomCreated);
+  realtimeEvents.on('lobby:room_updated', emitLobbyRoomUpdated);
+  realtimeEvents.on('lobby:room_removed', emitLobbyRoomRemoved);
   await eventSubscriber.subscribe(REALTIME_EVENTS_CHANNEL, (rawEvent) => {
     const event = parseRealtimeEvent(rawEvent);
     if (event?.type === 'room:closed') {
@@ -309,6 +325,9 @@ export async function createSocketServer(
       realtimeEvents.off('room:closed', emitRoomClosed);
       realtimeEvents.off('room:player_left', emitRoomPlayerLeft);
       realtimeEvents.off('chat:message', emitChatMessage);
+      realtimeEvents.off('lobby:room_created', emitLobbyRoomCreated);
+      realtimeEvents.off('lobby:room_updated', emitLobbyRoomUpdated);
+      realtimeEvents.off('lobby:room_removed', emitLobbyRoomRemoved);
       await io.close();
       await Promise.all([pubClient.quit(), subClient.quit(), eventSubscriber.quit()]);
     },

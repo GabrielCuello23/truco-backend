@@ -7,7 +7,10 @@ import { z } from 'zod';
 import type { Database } from '../../database/client';
 import { gameEvents, games, roomMembers, rooms, users } from '../../database/schema';
 import { requireAuth } from '../../middlewares/auth';
-import { realtimeEvents } from '../../realtime/events';
+import {
+  realtimeEvents,
+  type LobbyRoomSnapshot,
+} from '../../realtime/events';
 import { AppError } from '../../shared/errors';
 import { scheduleBotTurn, scheduleNextHand } from '../games/bot.service';
 import {
@@ -62,6 +65,36 @@ const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function generateRoomCode(): string {
   return Array.from({ length: 6 }, () => codeAlphabet[randomInt(codeAlphabet.length)]).join('');
+}
+
+function toLobbyRoomSnapshot(
+  room: {
+    id: string;
+    name: string;
+    hostId: string;
+    isPublic: boolean;
+    maxPlayers: number;
+    targetScore: number;
+    withFlor: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  memberCount: number,
+): LobbyRoomSnapshot {
+  return {
+    id: room.id,
+    name: room.name,
+    code: null,
+    hostId: room.hostId,
+    isPublic: room.isPublic,
+    status: 'waiting',
+    maxPlayers: room.maxPlayers,
+    targetScore: room.targetScore === 15 ? 15 : 30,
+    withFlor: room.withFlor,
+    createdAt: room.createdAt.toISOString(),
+    updatedAt: room.updatedAt.toISOString(),
+    memberCount,
+  };
 }
 
 export function createRoomRouter(database: Database): Router {
@@ -147,6 +180,10 @@ export function createRoomRouter(database: Database): Router {
           },
           'Room created',
         );
+
+        realtimeEvents.emit('lobby:room_created', {
+          room: toLobbyRoomSnapshot(result, 1),
+        });
 
         response.status(201).json({ room: result });
         return;
@@ -271,7 +308,7 @@ export function createRoomRouter(database: Database): Router {
     const { code } = joinRoomSchema.parse(request.body);
     const userId = request.auth!.userId;
 
-    const room = await database.transaction(async (transaction) => {
+    const joinResult = await database.transaction(async (transaction) => {
       const [roomRecord] = await transaction
         .select()
         .from(rooms)
@@ -290,7 +327,7 @@ export function createRoomRouter(database: Database): Router {
         .limit(1);
 
       if (existingMembership) {
-        return roomRecord;
+        return { room: roomRecord, becameFull: false };
       }
 
       if (roomRecord.status !== 'waiting') {
@@ -318,8 +355,13 @@ export function createRoomRouter(database: Database): Router {
         .where(eq(rooms.id, roomRecord.id))
         .returning();
 
-      return updatedRoom ?? roomRecord;
+      return {
+        room: updatedRoom ?? roomRecord,
+        becameFull: members.length + 1 >= roomRecord.maxPlayers,
+      };
     });
+
+    const room = joinResult.room;
 
     const members = await database
       .select({
@@ -331,6 +373,14 @@ export function createRoomRouter(database: Database): Router {
       .from(roomMembers)
       .innerJoin(users, eq(users.id, roomMembers.userId))
       .where(eq(roomMembers.roomId, room.id));
+
+    if (joinResult.becameFull) {
+      realtimeEvents.emit('lobby:room_removed', { roomId: room.id });
+    } else {
+      realtimeEvents.emit('lobby:room_updated', {
+        room: toLobbyRoomSnapshot(room, members.length),
+      });
+    }
 
     response.status(200).json({ room, members });
   });
@@ -350,12 +400,14 @@ export function createRoomRouter(database: Database): Router {
       .orderBy(asc(rooms.createdAt));
 
     response.status(200).json({
-      rooms: rows.map(({ room, memberCount }) => ({
-        ...room,
-        // Los códigos nunca forman parte del lobby; se comparten sólo dentro de la sala.
-        code: null,
-        memberCount: Number(memberCount),
-      })),
+      rooms: rows
+        .filter(({ room, memberCount }) => Number(memberCount) < room.maxPlayers)
+        .map(({ room, memberCount }) => ({
+          ...room,
+          // Los códigos nunca forman parte del lobby; se comparten sólo dentro de la sala.
+          code: null,
+          memberCount: Number(memberCount),
+        })),
     });
   });
 
@@ -585,6 +637,7 @@ export function createRoomRouter(database: Database): Router {
       await transaction.delete(rooms).where(eq(rooms.id, roomId));
       return {
         type: 'room_closed' as const,
+        notifyLobbyRoomRemoved: room.status === 'waiting',
         notifyRoomClosed: remainingMembers.length > 0,
       };
     });
@@ -593,6 +646,13 @@ export function createRoomRouter(database: Database): Router {
       realtimeEvents.emit('room:player_left', result.event);
     } else if (result.notifyRoomClosed) {
       realtimeEvents.emit('room:closed', { roomId });
+    }
+    if (
+      result.type === 'room_closed' &&
+      result.notifyLobbyRoomRemoved &&
+      !result.notifyRoomClosed
+    ) {
+      realtimeEvents.emit('lobby:room_removed', { roomId });
     }
     response.status(204).send();
   });
@@ -603,7 +663,7 @@ export function createRoomRouter(database: Database): Router {
     const userId = request.auth!.userId;
     const membership = await assertRoomMember(roomId, userId);
 
-    const game = await database.transaction(async (transaction) => {
+    const startResult = await database.transaction(async (transaction) => {
       const [room] = await transaction
         .select()
         .from(rooms)
@@ -630,7 +690,7 @@ export function createRoomRouter(database: Database): Router {
         .limit(1);
 
       if (latestGame && ['waiting', 'in_progress'].includes(latestGame.status)) {
-        return latestGame;
+        return { game: latestGame, startedNow: false };
       }
 
       const previousState = latestGame?.state as unknown as GameState | undefined;
@@ -676,8 +736,14 @@ export function createRoomRouter(database: Database): Router {
         .set({ status: 'in_progress', updatedAt: new Date() })
         .where(eq(rooms.id, roomId));
 
-      return createdGame;
+      return { game: createdGame, startedNow: true };
     });
+
+    const { game, startedNow } = startResult;
+
+    if (startedNow) {
+      realtimeEvents.emit('lobby:room_removed', { roomId });
+    }
 
     realtimeEvents.emit('game:updated', {
       roomId: game.roomId,
