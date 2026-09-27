@@ -416,7 +416,7 @@ export function createRoomRouter(database: Database): Router {
     const { code } = joinRoomByIdSchema.parse(request.body ?? {});
     const userId = request.auth!.userId;
 
-    const room = await database.transaction(async (transaction) => {
+    const joinResult = await database.transaction(async (transaction) => {
       const [roomRecord] = await transaction
         .select()
         .from(rooms)
@@ -443,7 +443,7 @@ export function createRoomRouter(database: Database): Router {
         .limit(1);
 
       if (existingMembership) {
-        return roomRecord;
+        return { room: roomRecord, joined: false };
       }
 
       if (roomRecord.status !== 'waiting') {
@@ -471,8 +471,10 @@ export function createRoomRouter(database: Database): Router {
         .where(eq(rooms.id, roomId))
         .returning();
 
-      return updatedRoom ?? roomRecord;
+      return { room: updatedRoom ?? roomRecord, joined: true };
     });
+
+    const room = joinResult.room;
 
     const members = await database
       .select({
@@ -483,7 +485,17 @@ export function createRoomRouter(database: Database): Router {
       })
       .from(roomMembers)
       .innerJoin(users, eq(users.id, roomMembers.userId))
-      .where(eq(roomMembers.roomId, room.id));
+      .where(and(eq(roomMembers.roomId, room.id), isNull(roomMembers.leftAt)));
+
+    if (joinResult.joined) {
+      if (members.length >= room.maxPlayers) {
+        realtimeEvents.emit('lobby:room_removed', { roomId: room.id });
+      } else {
+        realtimeEvents.emit('lobby:room_updated', {
+          room: toLobbyRoomSnapshot(room, members.length),
+        });
+      }
+    }
 
     response.status(200).json({ room, members });
   });

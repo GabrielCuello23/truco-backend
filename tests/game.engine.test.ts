@@ -121,6 +121,40 @@ describe('truco game engine', () => {
     expect(getAvailableActions(state, 'player-2')).toEqual(['quiero', 'no_quiero', 'fold']);
   });
 
+  it('does not offer envido after the responder has already played their first card', () => {
+    let state = createNoFlorState();
+    state = applyGameAction(state, 'player-1', {
+      type: 'play_card',
+      cardId: state.hands['player-1']![0]!.id,
+    });
+    state = applyGameAction(state, 'player-2', { type: 'truco' });
+
+    expect(getAvailableActions(state, 'player-1')).toEqual([
+      'quiero',
+      'no_quiero',
+      'retruco',
+      'fold',
+    ]);
+  });
+
+  it('offers envido responses when envido is called after the first card', () => {
+    let state = createNoFlorState();
+    state = applyGameAction(state, 'player-1', {
+      type: 'play_card',
+      cardId: state.hands['player-1']![0]!.id,
+    });
+    state = applyGameAction(state, 'player-2', { type: 'envido' });
+
+    expect(getAvailableActions(state, 'player-1')).toEqual([
+      'quiero',
+      'no_quiero',
+      'envido',
+      'real_envido',
+      'falta_envido',
+      'fold',
+    ]);
+  });
+
   it('follows the flor raise matrix and does not create a response without rival flor', () => {
     let state = createState();
     const deck = createDeck();
@@ -162,6 +196,54 @@ describe('truco game engine', () => {
     expect(getAvailableActions(state, 'player-1')).not.toContain('retruco');
     expect(state.currentTurnPlayerId).toBe('player-1');
     expect(state.scores).toEqual({ A: 0, B: 0 });
+  });
+
+  it('offers retruco to the responder after the next round starts', () => {
+    let state = createNoFlorState();
+    const deck = createDeck();
+    state.hands = {
+      'player-1': [
+        deck.find((card) => card.id === '4-copas')!,
+        deck.find((card) => card.id === '3-espadas')!,
+        deck.find((card) => card.id === '5-bastos')!,
+      ],
+      'player-2': [
+        deck.find((card) => card.id === '7-bastos')!,
+        deck.find((card) => card.id === '2-espadas')!,
+        deck.find((card) => card.id === '6-copas')!,
+      ],
+    };
+
+    state = applyGameAction(state, 'player-1', {
+      type: 'play_card',
+      cardId: '4-copas',
+    });
+    state = applyGameAction(state, 'player-2', {
+      type: 'play_card',
+      cardId: '7-bastos',
+    });
+    state = applyGameAction(state, 'player-2', {
+      type: 'play_card',
+      cardId: '2-espadas',
+    });
+    state = applyGameAction(state, 'player-1', { type: 'truco' });
+    state = applyGameAction(state, 'player-2', { type: 'quiero' });
+
+    expect(getAvailableActions(state, 'player-2')).not.toContain('retruco');
+
+    state = applyGameAction(state, 'player-1', {
+      type: 'play_card',
+      cardId: '3-espadas',
+    });
+    expect(getAvailableActions(state, 'player-2')).not.toContain('retruco');
+
+    state = applyGameAction(state, 'player-1', {
+      type: 'play_card',
+      cardId: '5-bastos',
+    });
+
+    expect(getAvailableActions(state, 'player-2')).toContain('retruco');
+    expect(getAvailableActions(state, 'player-2')).toContain('fold');
   });
 
   it('keeps the direct retruco response and resumes with the caller', () => {

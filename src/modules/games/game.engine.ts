@@ -482,7 +482,10 @@ function canCallEnvidoForState(state: GameState, actorId: string): boolean {
   }
 
   return (
-    state.envido.calls.length === 0 && !actorHasFlor && canActInInitialBettingWindow(state, actorId)
+    state.envido.calls.length === 0 &&
+    !actorHasFlor &&
+    !state.currentRoundCards.some((playedCard) => playedCard.playerId === actorId) &&
+    canActInInitialBettingWindow(state, actorId)
   );
 }
 
@@ -776,7 +779,10 @@ function resolveTruco(state: GameState, accepted: boolean): void {
     state.handWinnerTeam = getPlayerTeam(state, pending.callerId);
     revealEnvidoCards(state);
   } else {
-    state.truco.teamWithRaiseRight = null;
+    // Quien acepta el truco conserva el derecho a cantar retruco, pero no
+    // puede hacerlo hasta que vuelva a ser su turno de juego.
+    state.truco.teamWithRaiseRight =
+      pending.type === 'truco' ? getPlayerTeam(state, pending.responderId) : null;
     state.currentTurnPlayerId = pending.callerId;
   }
 
@@ -931,7 +937,10 @@ function canCallTrucoForState(state: GameState, actorId: string, call: TrucoCall
   }
 
   if (state.truco.teamWithRaiseRight) {
-    return state.truco.teamWithRaiseRight === getPlayerTeam(state, actorId);
+    return (
+      state.truco.teamWithRaiseRight === getPlayerTeam(state, actorId) &&
+      state.currentTurnPlayerId === actorId
+    );
   }
 
   return call === 'truco' && state.currentTurnPlayerId === actorId;
