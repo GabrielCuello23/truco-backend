@@ -50,6 +50,20 @@
       "when": 1790551670464,
       "tag": "0006_loving_raza",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790558097092,
+      "tag": "0007_high_black_cat",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790560663101,
+      "tag": "0008_secret_mister_fear",
+      "breakpoints": true
     }
   ]
 }

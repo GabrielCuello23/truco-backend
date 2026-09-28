@@ -61,6 +61,9 @@ services:
       DB_POOL_MAX: 20
       ROOM_INACTIVITY_TTL_HOURS: 4
       ROOM_CLEANUP_INTERVAL_SECONDS: 300
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-eslagamesoficial@gmail.com}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-Esla Games}
     ports:
       - '3000:3000'
     volumes:

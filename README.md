@@ -18,6 +18,18 @@ npm run db:migrate
 npm run dev
 ```
 
+### Verificación de email con Brevo
+
+Copiá `.env.example` a `.env` y completá estas variables con una API key nueva de Brevo y un remitente verificado:
+
+```env
+BREVO_API_KEY=...
+BREVO_SENDER_EMAIL=eslagamesoficial@gmail.com
+BREVO_SENDER_NAME=Esla Games
+```
+
+La API key es un secreto: no la guardes en el repositorio ni la compartas en mensajes. Después de configurar el entorno, ejecutá `npm run db:migrate` y reiniciá la API.
+
 La API queda disponible en `http://localhost:3000`.
 
 Compose publica PostgreSQL en `localhost:5433` y Redis en `localhost:6380` para no interferir con otros servicios locales.

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 
 import { and, asc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import { hash, verify } from 'argon2';
@@ -14,8 +14,8 @@ const jwtSecret = new TextEncoder().encode(env.JWT_SECRET);
 
 export type PublicUser = Pick<
   typeof users.$inferSelect,
-  'id' | 'email' | 'displayName' | 'role' | 'countryCode' | 'pendingCountryCode'
->;
+  'id' | 'email' | 'displayName' | 'points' | 'role' | 'countryCode' | 'pendingCountryCode'
+> & { emailVerified: boolean };
 
 export type ProfileStats = {
   matches: number;
@@ -75,6 +75,8 @@ function toPublicUser(user: typeof users.$inferSelect): PublicUser {
     id: user.id,
     email: user.email,
     displayName: user.displayName,
+    points: user.points,
+    emailVerified: Boolean(user.emailVerifiedAt),
     role: user.role,
     countryCode: user.countryCode,
     pendingCountryCode: user.pendingCountryCode,
@@ -96,6 +98,8 @@ export async function registerUser(
           email,
           passwordHash,
           displayName: input.nickname.trim(),
+          points: 10,
+          emailVerifiedAt: null,
           countryCode: input.countryCode,
         })
         .returning();
@@ -181,6 +185,15 @@ export async function updateUserProfile(
         .set({
           displayName: input.displayName.trim(),
           email,
+          ...(currentUser.email !== email
+            ? {
+                emailVerifiedAt: null,
+                emailVerificationCodeHash: null,
+                emailVerificationCodeExpiresAt: null,
+                emailVerificationSentAt: null,
+                emailVerificationAttemptCount: 0,
+              }
+            : {}),
           ...(currentUser.countryCode
             ? {
                 pendingCountryCode:
@@ -210,6 +223,182 @@ export async function updateUserProfile(
 
     throw error;
   }
+}
+
+const EMAIL_VERIFICATION_CODE_TTL_MS = 15 * 60 * 1000;
+const EMAIL_VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000;
+const MAX_EMAIL_VERIFICATION_ATTEMPTS = 5;
+
+function hashEmailVerificationCode(userId: string, code: string): string {
+  return createHash('sha256').update(`${userId}:${code}`).digest('hex');
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>'"]/g,
+    (character) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character] ??
+      character,
+  );
+}
+
+async function sendBrevoVerificationEmail(
+  email: string,
+  displayName: string,
+  code: string,
+): Promise<void> {
+  if (!env.BREVO_API_KEY) {
+    throw new AppError(
+      503,
+      'EMAIL_SERVICE_NOT_CONFIGURED',
+      'La verificación de email todavía no está configurada.',
+    );
+  }
+
+  const safeDisplayName = escapeHtml(displayName);
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': env.BREVO_API_KEY,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME },
+      to: [{ email, name: displayName }],
+      subject: 'Verificá tu email en Esla Games',
+      textContent: `Hola ${displayName}, tu código de verificación es ${code}. Vence en 15 minutos.`,
+      htmlContent: `<p>Hola ${safeDisplayName},</p><p>Tu código para verificar el email en Esla Games es:</p><p style="font-size: 28px; font-weight: bold; letter-spacing: 8px;">${code}</p><p>Este código vence en 15 minutos.</p>`,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new AppError(502, 'EMAIL_DELIVERY_FAILED', 'No se pudo enviar el email de verificación.');
+  }
+}
+
+export async function requestEmailVerification(
+  database: Database,
+  userId: string,
+): Promise<{ user: PublicUser; expiresAt: string }> {
+  const [user] = await database.select().from(users).where(eq(users.id, userId)).limit(1);
+
+  if (!user) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+  }
+
+  if (!user.email) {
+    throw new AppError(400, 'EMAIL_REQUIRED', 'Tu cuenta no tiene un email para verificar.');
+  }
+
+  if (user.emailVerifiedAt) {
+    throw new AppError(409, 'EMAIL_ALREADY_VERIFIED', 'Tu email ya está verificado.');
+  }
+
+  const now = new Date();
+  if (
+    user.emailVerificationSentAt &&
+    now.getTime() - user.emailVerificationSentAt.getTime() < EMAIL_VERIFICATION_RESEND_COOLDOWN_MS
+  ) {
+    throw new AppError(
+      429,
+      'EMAIL_VERIFICATION_COOLDOWN',
+      'Esperá un minuto antes de solicitar otro código.',
+    );
+  }
+
+  const code = randomInt(100000, 1000000).toString();
+  const codeHash = hashEmailVerificationCode(user.id, code);
+  const expiresAt = new Date(now.getTime() + EMAIL_VERIFICATION_CODE_TTL_MS);
+
+  await sendBrevoVerificationEmail(user.email, user.displayName, code);
+
+  const [updatedUser] = await database
+    .update(users)
+    .set({
+      emailVerificationCodeHash: codeHash,
+      emailVerificationCodeExpiresAt: expiresAt,
+      emailVerificationSentAt: now,
+      emailVerificationAttemptCount: 0,
+      updatedAt: now,
+    })
+    .where(eq(users.id, user.id))
+    .returning();
+
+  if (!updatedUser) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+  }
+
+  return { user: toPublicUser(updatedUser), expiresAt: expiresAt.toISOString() };
+}
+
+export async function verifyEmailCode(
+  database: Database,
+  userId: string,
+  code: string,
+): Promise<PublicUser> {
+  const [user] = await database.select().from(users).where(eq(users.id, userId)).limit(1);
+
+  if (!user) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+  }
+
+  if (user.emailVerifiedAt) {
+    return toPublicUser(user);
+  }
+
+  const isExpired =
+    !user.emailVerificationCodeExpiresAt ||
+    user.emailVerificationCodeExpiresAt.getTime() <= Date.now();
+  const expectedHash = hashEmailVerificationCode(user.id, code);
+
+  if (
+    isExpired ||
+    !user.emailVerificationCodeHash ||
+    user.emailVerificationCodeHash !== expectedHash
+  ) {
+    const nextAttemptCount = user.emailVerificationAttemptCount + 1;
+    await database
+      .update(users)
+      .set(
+        nextAttemptCount >= MAX_EMAIL_VERIFICATION_ATTEMPTS
+          ? {
+              emailVerificationCodeHash: null,
+              emailVerificationCodeExpiresAt: null,
+              emailVerificationAttemptCount: 0,
+              updatedAt: new Date(),
+            }
+          : { emailVerificationAttemptCount: nextAttemptCount, updatedAt: new Date() },
+      )
+      .where(eq(users.id, userId));
+
+    throw new AppError(
+      400,
+      'INVALID_EMAIL_VERIFICATION_CODE',
+      isExpired
+        ? 'El código expiró. Solicitá uno nuevo.'
+        : 'El código de verificación no es válido.',
+    );
+  }
+
+  const [verifiedUser] = await database
+    .update(users)
+    .set({
+      emailVerifiedAt: new Date(),
+      emailVerificationCodeHash: null,
+      emailVerificationCodeExpiresAt: null,
+      emailVerificationSentAt: null,
+      emailVerificationAttemptCount: 0,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId))
+    .returning();
+
+  if (!verifiedUser) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Usuario no encontrado.');
+  }
+
+  return toPublicUser(verifiedUser);
 }
 
 type StoredGameState = {

@@ -8,10 +8,12 @@ import {
   getUserById,
   getProfileStats,
   loginUser,
+  requestEmailVerification,
   refreshUserTokens,
   registerUser,
   revokeRefreshToken,
   updateUserProfile,
+  verifyEmailCode,
 } from './auth.service';
 import { countryCodeSchema } from './countries';
 
@@ -35,6 +37,10 @@ const updateProfileSchema = z.object({
   displayName: z.string().trim().min(2).max(80),
   email: z.string().trim().email(),
   countryCode: countryCodeSchema,
+});
+
+const verifyEmailCodeSchema = z.object({
+  code: z.string().regex(/^\d{6}$/),
 });
 
 export function createAuthRouter(database: Database): Router {
@@ -72,6 +78,17 @@ export function createAuthRouter(database: Database): Router {
   router.get('/me/stats', requireAuth, async (request, response) => {
     const stats = await getProfileStats(database, request.auth!.userId);
     response.status(200).json({ stats });
+  });
+
+  router.post('/me/email-verification', requireAuth, async (request, response) => {
+    const result = await requestEmailVerification(database, request.auth!.userId);
+    response.status(200).json(result);
+  });
+
+  router.post('/me/email-verification/confirm', requireAuth, async (request, response) => {
+    const { code } = verifyEmailCodeSchema.parse(request.body);
+    const user = await verifyEmailCode(database, request.auth!.userId, code);
+    response.status(200).json({ user });
   });
 
   router.patch('/me', requireAuth, async (request, response) => {

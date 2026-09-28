@@ -24,6 +24,9 @@ const envSchema = z
     DB_POOL_MAX: z.coerce.number().int().positive().max(100).default(20),
     ROOM_INACTIVITY_TTL_HOURS: z.coerce.number().positive().default(4),
     ROOM_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(300),
+    BREVO_API_KEY: z.string().default(''),
+    BREVO_SENDER_EMAIL: z.string().email().default('eslagamesoficial@gmail.com'),
+    BREVO_SENDER_NAME: z.string().default('Esla Games'),
   })
   .superRefine((values, context) => {
     if (values.NODE_ENV === 'production' && values.JWT_SECRET === developmentJwtSecret) {
