@@ -6,6 +6,7 @@ import { requireAuth } from '../../middlewares/auth';
 import {
   requestCountryChange,
   getUserById,
+  getProfileStats,
   loginUser,
   refreshUserTokens,
   registerUser,
@@ -66,6 +67,11 @@ export function createAuthRouter(database: Database): Router {
   router.get('/me', requireAuth, async (request, response) => {
     const user = await getUserById(database, request.auth!.userId);
     response.status(200).json({ user });
+  });
+
+  router.get('/me/stats', requireAuth, async (request, response) => {
+    const stats = await getProfileStats(database, request.auth!.userId);
+    response.status(200).json({ stats });
   });
 
   router.patch('/me', requireAuth, async (request, response) => {

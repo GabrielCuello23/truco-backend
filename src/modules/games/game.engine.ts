@@ -81,6 +81,7 @@ export type GameState = {
   withFlor: boolean;
   players: GamePlayer[];
   scores: Record<Team, number>;
+  matchWinnerTeam?: Team;
   manoPlayerId: string;
   handNumber: number;
   hands: Record<string, GameCard[]>;
@@ -286,9 +287,7 @@ function getEnvidoScoringCards(cards: GameCard[]): GameCard[] {
     return bestPair;
   }
 
-  const highestCard = [...cards].sort(
-    (first, second) => second.envidoValue - first.envidoValue,
-  )[0];
+  const highestCard = [...cards].sort((first, second) => second.envidoValue - first.envidoValue)[0];
   return highestCard ? [highestCard] : [];
 }
 

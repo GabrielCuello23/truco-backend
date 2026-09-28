@@ -7,10 +7,7 @@ import { z } from 'zod';
 import type { Database } from '../../database/client';
 import { gameEvents, games, roomMembers, rooms, users } from '../../database/schema';
 import { requireAuth } from '../../middlewares/auth';
-import {
-  realtimeEvents,
-  type LobbyRoomSnapshot,
-} from '../../realtime/events';
+import { realtimeEvents, type LobbyRoomSnapshot } from '../../realtime/events';
 import { AppError } from '../../shared/errors';
 import { scheduleBotTurn, scheduleNextHand } from '../games/bot.service';
 import {
@@ -599,6 +596,9 @@ export function createRoomRouter(database: Database): Router {
 
       if (winner && game) {
         const now = new Date();
+        const forfeitedState = gameState
+          ? { ...gameState, matchWinnerTeam: winner.team }
+          : gameState;
         await transaction
           .update(roomMembers)
           .set({ leftAt: now })
@@ -611,7 +611,11 @@ export function createRoomRouter(database: Database): Router {
           );
         await transaction
           .update(games)
-          .set({ status: 'finished', updatedAt: now })
+          .set({
+            status: 'finished',
+            state: forfeitedState as unknown as Record<string, unknown>,
+            updatedAt: now,
+          })
           .where(eq(games.id, game.id));
         await transaction
           .update(rooms)
@@ -645,6 +649,14 @@ export function createRoomRouter(database: Database): Router {
         .select({ userId: roomMembers.userId })
         .from(roomMembers)
         .where(and(eq(roomMembers.roomId, roomId), isNull(roomMembers.leftAt)));
+
+      if (room.status === 'finished') {
+        return {
+          type: 'room_closed' as const,
+          notifyLobbyRoomRemoved: false,
+          notifyRoomClosed: remainingMembers.length > 0,
+        };
+      }
 
       await transaction.delete(rooms).where(eq(rooms.id, roomId));
       return {

@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { and, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import { hash, verify } from 'argon2';
 import { SignJWT } from 'jose';
 
 import { env } from '../../config/env';
 import type { Database } from '../../database/client';
-import { authAccounts, refreshSessions, users } from '../../database/schema';
+import { authAccounts, games, refreshSessions, roomMembers, users } from '../../database/schema';
 import { AppError } from '../../shared/errors';
 import { type CountryCode } from './countries';
 
@@ -16,6 +16,14 @@ export type PublicUser = Pick<
   typeof users.$inferSelect,
   'id' | 'email' | 'displayName' | 'role' | 'countryCode' | 'pendingCountryCode'
 >;
+
+export type ProfileStats = {
+  matches: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  bestStreak: number;
+};
 
 type TokenPair = {
   accessToken: string;
@@ -202,6 +210,77 @@ export async function updateUserProfile(
 
     throw error;
   }
+}
+
+type StoredGameState = {
+  players?: Array<{ id?: unknown; team?: unknown }>;
+  scores?: { A?: unknown; B?: unknown };
+  matchWinnerTeam?: unknown;
+};
+
+type MatchOutcome = 'win' | 'loss' | null;
+
+function getMatchOutcome(state: unknown, userId: string): MatchOutcome {
+  const gameState = state as StoredGameState;
+  const player = gameState.players?.find((candidate) => candidate.id === userId);
+
+  if (player?.team !== 'A' && player?.team !== 'B') {
+    return null;
+  }
+
+  const winnerTeam =
+    gameState.matchWinnerTeam === 'A' || gameState.matchWinnerTeam === 'B'
+      ? gameState.matchWinnerTeam
+      : typeof gameState.scores?.A === 'number' && typeof gameState.scores?.B === 'number'
+        ? gameState.scores.A === gameState.scores.B
+          ? null
+          : gameState.scores.A > gameState.scores.B
+            ? 'A'
+            : 'B'
+        : null;
+
+  if (!winnerTeam) {
+    return null;
+  }
+
+  return winnerTeam === player.team ? 'win' : 'loss';
+}
+
+export async function getProfileStats(database: Database, userId: string): Promise<ProfileStats> {
+  const finishedGames = await database
+    .select({ state: games.state })
+    .from(games)
+    .innerJoin(roomMembers, eq(roomMembers.roomId, games.roomId))
+    .where(and(eq(roomMembers.userId, userId), eq(games.status, 'finished')))
+    .orderBy(asc(games.createdAt));
+
+  let wins = 0;
+  let losses = 0;
+  let currentStreak = 0;
+  let bestStreak = 0;
+
+  for (const game of finishedGames) {
+    const outcome = getMatchOutcome(game.state, userId);
+
+    if (outcome === 'win') {
+      wins += 1;
+      currentStreak += 1;
+      bestStreak = Math.max(bestStreak, currentStreak);
+    } else if (outcome === 'loss') {
+      losses += 1;
+      currentStreak = 0;
+    }
+  }
+
+  const matches = wins + losses;
+
+  return {
+    matches,
+    wins,
+    losses,
+    winRate: matches > 0 ? Number(((wins / matches) * 100).toFixed(1)) : 0,
+    bestStreak,
+  };
 }
 
 /** Applies requested country changes when the active season is reset. */
