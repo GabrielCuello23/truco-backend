@@ -32,3 +32,12 @@ export const requireAuth: RequestHandler = async (request, _response, next) => {
     );
   }
 };
+
+export const requireAdmin: RequestHandler = (request, _response, next) => {
+  if (request.auth?.role !== 'admin') {
+    next(new AppError(403, 'ADMIN_ACCESS_REQUIRED', 'Se requieren permisos de administrador.'));
+    return;
+  }
+
+  next();
+};

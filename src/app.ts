@@ -13,6 +13,7 @@ import type { RedisClient } from './infrastructure/redis';
 import { errorHandler } from './middlewares/error-handler';
 import { notFoundHandler } from './middlewares/not-found';
 import { createAuthRouter } from './modules/auth/auth.routes';
+import { createAdminRouter } from './modules/admin/admin.routes';
 import { createChatRouter } from './modules/chat/chat.routes';
 import { createHealthRouter } from './modules/health/health.routes';
 import { createRoomRouter } from './modules/rooms/room.routes';
@@ -98,6 +99,7 @@ export function createApp(dependencies: AppDependencies): express.Express {
     createHealthRouter({ pingDatabase: dependencies.pingDatabase, redis: dependencies.redis }),
   );
   apiRouter.use('/auth', createAuthRouter(dependencies.database));
+  apiRouter.use('/admin', createAdminRouter(dependencies.database));
   apiRouter.use('/rooms', createRoomRouter(dependencies.database));
   apiRouter.use('/rooms', createChatRouter(dependencies.database));
   app.use('/api/v1', apiRouter);

@@ -54,7 +54,7 @@ services:
       JWT_SECRET: replace-this-with-a-local-development-secret-32-chars
       ACCESS_TOKEN_TTL_SECONDS: 900
       REFRESH_TOKEN_TTL_DAYS: 180
-      CORS_ORIGINS: http://localhost:8081,http://localhost:19006
+      CORS_ORIGINS: http://localhost:8081,http://localhost:19006,http://localhost:3001
       LOG_LEVEL: debug
       OTEL_ENABLED: 'false'
       OTEL_SERVICE_NAME: truco-backend
@@ -89,7 +89,7 @@ services:
       JWT_SECRET: replace-this-with-a-local-development-secret-32-chars
       ACCESS_TOKEN_TTL_SECONDS: 900
       REFRESH_TOKEN_TTL_DAYS: 180
-      CORS_ORIGINS: http://localhost:8081,http://localhost:19006
+      CORS_ORIGINS: http://localhost:8081,http://localhost:19006,http://localhost:3001
       LOG_LEVEL: debug
       OTEL_ENABLED: 'false'
       OTEL_SERVICE_NAME: truco-worker

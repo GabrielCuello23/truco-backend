@@ -22,7 +22,8 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "admin:promote": "tsx scripts/promote-admin.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",

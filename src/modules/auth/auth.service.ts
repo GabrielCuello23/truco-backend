@@ -487,10 +487,10 @@ export async function applyPendingCountryChanges(database: Database): Promise<nu
   return updatedUsers.length;
 }
 
-export async function loginUser(
+async function authenticateUser(
   database: Database,
   input: { email: string; password: string },
-): Promise<{ user: PublicUser; tokens: TokenPair }> {
+): Promise<PublicUser> {
   const [result] = await database
     .select({ user: users })
     .from(users)
@@ -506,8 +506,28 @@ export async function loginUser(
     throw new AppError(401, 'INVALID_CREDENTIALS', 'Email o contraseña incorrectos.');
   }
 
-  const publicUser = toPublicUser(user);
-  return { user: publicUser, tokens: await issueTokenPair(database, publicUser) };
+  return toPublicUser(user);
+}
+
+export async function loginUser(
+  database: Database,
+  input: { email: string; password: string },
+): Promise<{ user: PublicUser; tokens: TokenPair }> {
+  const user = await authenticateUser(database, input);
+  return { user, tokens: await issueTokenPair(database, user) };
+}
+
+export async function loginAdminUser(
+  database: Database,
+  input: { email: string; password: string },
+): Promise<{ user: PublicUser; tokens: TokenPair }> {
+  const user = await authenticateUser(database, input);
+
+  if (user.role !== 'admin') {
+    throw new AppError(403, 'ADMIN_ACCESS_REQUIRED', 'La cuenta no tiene acceso al backoffice.');
+  }
+
+  return { user, tokens: await issueTokenPair(database, user) };
 }
 
 export async function refreshUserTokens(

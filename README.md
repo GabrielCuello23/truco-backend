@@ -32,6 +32,14 @@ La API key es un secreto: no la guardes en el repositorio ni la compartas en men
 
 La API queda disponible en `http://localhost:3000`.
 
+El backoffice web corre por defecto en `http://localhost:3001` y usa los endpoints administrativos protegidos bajo `/api/v1/admin`. Para entrar se necesita un usuario cuyo campo `role` sea `admin`.
+
+Para promover una cuenta ya registrada a super admin:
+
+```bash
+npm run admin:promote -- admin@eslagames.com
+```
+
 Compose publica PostgreSQL en `localhost:5433` y Redis en `localhost:6380` para no interferir con otros servicios locales.
 
 ```bash
